@@ -48,7 +48,7 @@ app.get('/checkout', (req, res, next) => {
 
 app.get('/metrics', (req, res) => {
   res.set('Content-Type', Prometheus.register.contentType)
-  res.end(Prometheus.register.metrics())
+  res.send(Prometheus.register.metrics())
 })
 
 // Error handler
