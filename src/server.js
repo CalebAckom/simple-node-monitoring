@@ -41,7 +41,7 @@ app.get('/', (req, res) => {
 // Metrics endpoint
 app.get('/metrics', (req, res) => {
     res.set('Content-Type', client.register.contentType)
-    res.end(client.register.metrics())
+    res.send(client.register.metrics())
 })
 
 app.listen(PORT)
