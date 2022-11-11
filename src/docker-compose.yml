@@ -1,0 +1,11 @@
+version: "3"
+services:
+  simple-node:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: simple-node
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./app:/app/modules
