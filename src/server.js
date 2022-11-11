@@ -1,48 +1,89 @@
-'use strict';
+'use strict'
 
-const express = require('express');
+const express = require('express')
+const Prometheus = require('prom-client')
 
-// Constant
-const PORT = 5000
-
-// Application
-const client = require('prom-client');
-const collectDefaultMetrics = client.collectDefaultMetrics;
-collectDefaultMetrics({ timeout: 5000 });
-
-const counter = new client.Counter({
-    name: 'node_request_operations_total',
-    help: 'The total number of processed requests'
-});
-
-const histogram = new client.Histogram({
-    name: 'node_request_duration_seconds',
-    help: 'Histogram for the duration in seconds',
-    buckets: [1, 2, 5, 6, 10]
-});
-
-const app = express();
-app.get('/', (req, res) => {
-    // Simulating sleep
-    var start = new Date()
-    var simulateTime = 1000
-
-    setTimeout(function(argument) {
-        // Simulating execution time with setTimeout function
-        var end = new Date() - start
-        histogram.observe(end / 1000); //converting to seconds
-    }, simulateTime)
-
-    counter.inc();
-
-    res.send('We are DevOps\n');
-});
-
-// Metrics endpoint
-app.get('/metrics', (req, res) => {
-    res.set('Content-Type', client.register.contentType)
-    res.end(client.register.metrics())
+const app = express()
+const port = process.env.PORT || 5000
+const metricsInterval = Prometheus.collectDefaultMetrics()
+const checkoutsTotal = new Prometheus.Counter({
+  name: 'checkouts_total',
+  help: 'Total number of checkouts',
+  labelNames: ['payment_method']
+})
+const httpRequestDurationMicroseconds = new Prometheus.Histogram({
+  name: 'http_request_duration_ms',
+  help: 'Duration of HTTP requests in ms',
+  labelNames: ['method', 'route', 'code'],
+  buckets: [0.10, 5, 15, 50, 100, 200, 300, 400, 500]  // buckets for response time from 0.1ms to 500ms
 })
 
-app.listen(PORT)
-console.log(`Running on PORT ${PORT}`);
+// Runs before each requests
+app.use((req, res, next) => {
+  res.locals.startEpoch = Date.now()
+  next()
+})
+
+app.get('/', (req, res, next) => {
+  setTimeout(() => {
+    res.json({ message: 'DevOps!' })
+    next()
+  }, Math.round(Math.random() * 200))
+})
+
+app.get('/bad', (req, res, next) => {
+  next(new Error('My Error'))
+})
+
+app.get('/checkout', (req, res, next) => {
+  const paymentMethod = Math.round(Math.random()) === 0 ? 'stripe' : 'paypal'
+
+  checkoutsTotal.inc({
+    payment_method: paymentMethod
+  })
+
+  res.json({ status: 'ok' })
+  next()
+})
+
+app.get('/metrics', (req, res) => {
+  res.set('Content-Type', Prometheus.register.contentType)
+  res.end(Prometheus.register.metrics())
+})
+
+// Error handler
+app.use((err, req, res, next) => {
+  res.statusCode = 500
+  // Do not expose your error in production
+  res.json({ error: err.message })
+  next()
+})
+
+// Runs after each requests
+app.use((req, res, next) => {
+  const responseTimeInMs = Date.now() - res.locals.startEpoch
+
+  httpRequestDurationMicroseconds
+    .labels(req.method, req.route.path, res.statusCode)
+    .observe(responseTimeInMs)
+
+  next()
+})
+
+const server = app.listen(port, () => {
+  console.log(`Application listening on port ${port}!`)
+})
+
+// Graceful shutdown
+process.on('SIGTERM', () => {
+  clearInterval(metricsInterval)
+
+  server.close((err) => {
+    if (err) {
+      console.error(err)
+      process.exit(1)
+    }
+
+    process.exit(0)
+  })
+})
